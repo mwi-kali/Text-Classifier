@@ -1,0 +1,12 @@
+beautifulsoup4
+langchain-community
+langchain-pymupdf4llm
+langchain-unstructured
+langchain-yt-dlp
+langdetect
+playwright
+pytest
+streamlit==1.25.0
+torch
+transformers
+unstructured
