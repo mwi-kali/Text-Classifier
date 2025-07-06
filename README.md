@@ -1,7 +1,5 @@
 # Text Classifier & Summarizer
 
-**A modular, efficient, and fully local text processing application**
-
 ---
 
 ## Overview
