@@ -1,142 +1,67 @@
-import logging
-import re
-import spacy
-import string
-import subprocess
-import torch
+from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from langdetect import detect, LangDetectException
-from text_classifier.config import CLASSIFY_WINDOW, MAX_WORKERS
-from threading import Lock
-from transformers import pipeline, Pipeline
-from typing import List, Dict, Optional
+import logging
+from collections.abc import Callable
+
+from text_classifier import config, models
+from text_classifier.schemas import ClassificationResult, LabelScore
+from text_classifier.utils import first_words, suggest_topics
+
+logger = logging.getLogger(__name__)
+
+
+def detect_language(text: str) -> str:
+    try:
+        from langdetect import DetectorFactory, LangDetectException, detect
+    except ImportError:
+        return "unknown"
+    DetectorFactory.seed = 0
+    try:
+        return detect(text) if text.strip() else "unknown"
+    except LangDetectException:
+        return "unknown"
 
 
 class Classifier:
-    def __init__(self, default_topics: Optional[List[str]] = None):
-        self._lock = Lock()
-        self.device = 0 if torch.cuda.is_available() else -1
-        self.sentiment_pipe: Pipeline = pipeline(
-            "sentiment-analysis",
-            model="tabularisai/multilingual-sentiment-analysis",
-            device=self.device,
-        )
-        self.zero_shot_pipe: Pipeline = pipeline(
-            "zero-shot-classification",
-            model="facebook/bart-large-mnli",
-            device=self.device,
-        )
-        
-        try:
-            self._nlp = spacy.load("xx_ent_wiki_sm")
-        except OSError:
-            logging.info("Downloading spaCy 'xx_ent_wiki_sm' model...")
-            subprocess.run([
-                "python", "-m", "spacy", "download", "xx_ent_wiki_sm"
-            ], check=True)
-            self._nlp = spacy.load("xx_ent_wiki_sm")
-            
-        self.default_topics = default_topics or ["technology", "politics", "sports"]
+    """Pipelines are injected so tests (and alternative backends) don't need model downloads."""
 
-    @staticmethod
-    def _truncate(text: str) -> str:
-        return text[:CLASSIFY_WINDOW]
-
-    def _detect_language(self, text: str) -> str:
-        txt = text.strip()
-        if not txt:
-            return "unknown"
-        try:
-            return detect(txt)
-        except LangDetectException:
-            return "unknown"
-
-    def _suggest_topics(self, text: str, top_k: int) -> List[str]:
-        doc = self._nlp(text)
-        freq: Dict[str, int] = {}
-        
-        for ent in doc.ents:
-            raw = ent.text.strip().lower()
-            if not raw or raw.isdigit():
-                continue
-            
-            if all(char in string.punctuation or char.isspace() for char in raw):
-                continue
-            
-            words = raw.split()
-            if len(words) < 1 or len(words) > 3:
-                continue
-            
-            cleaned = " ".join(
-                tok.text for tok in self._nlp(raw)
-                if not tok.is_stop and tok.is_alpha
-            )
-            if not cleaned:
-                continue
-            freq[cleaned] = freq.get(cleaned, 0) + 1
-        if not freq:
-            return self.default_topics
-        sorted_topics = sorted(freq.items(), key=lambda x: x[1], reverse=True)
-        return [topic for topic, _ in sorted_topics[:top_k]]
-
-    def _zero_shot_classify(
-        self, text: str, labels: List[str], multi_label: bool = False
-    ) -> List[str]:
-        try:
-            with self._lock:
-                res = self.zero_shot_pipe(
-                    text, candidate_labels=labels, multi_label=multi_label
-                )
-            return res.get('labels', [])
-        except Exception as e:
-            logging.error(f"Zero-shot classification error: {e}")
-            return []
-
-    def _sentiment_classify(self, text: str) -> str:
-        try:
-            with self._lock:
-                pred = self.sentiment_pipe(text)[0]
-            return pred.get('label', 'unknown').lower()
-        except Exception as e:
-            logging.error(f"Sentiment analysis error: {e}")
-            return 'unknown'
-
-    def classify_all(
+    def __init__(
         self,
-        text: str,
-        topics: Optional[List[str]] = None,
-        top_k: int = 3,
-    ) -> Dict[str, object]:
-        truncated = self._truncate(text)
-        language = self._detect_language(text)
+        sentiment_pipe: Callable | None = None,
+        zero_shot_pipe: Callable | None = None,
+        default_topics: list[str] | None = None,
+    ) -> None:
+        self._sentiment_pipe = sentiment_pipe
+        self._zero_shot_pipe = zero_shot_pipe
+        self.default_topics = default_topics or config.DEFAULT_TOPICS
 
-        if topics is None:
-            topics = self._suggest_topics(text, top_k)
+    @property
+    def sentiment_pipe(self):
+        return self._sentiment_pipe if self._sentiment_pipe is not None else models.sentiment()
 
-        if not topics:
-            topics = self.default_topics
-            
-        tasks = {
-            'sentiment': lambda: self._sentiment_classify(truncated),
-            'style': lambda: (
-                self._zero_shot_classify(truncated, ['formal', 'informal']) or ['unknown']
-            )[0],
-            'political': lambda: (
-                self._zero_shot_classify(truncated, ['left', 'center', 'right']) or ['unknown']
-            )[0],
-            'topics': lambda: self._zero_shot_classify(truncated, topics)[:top_k],
-        }
-        
-        results: Dict[str, object] = {'language': language}
-        
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            future_map = {executor.submit(fn): name for name, fn in tasks.items()}
-            for fut in as_completed(future_map):
-                name = future_map[fut]
-                try:
-                    results[name] = fut.result()
-                except Exception as e:
-                    logging.error(f"Error in {name}: {e}")
-                    results[name] = [] if name == 'topics' else 'unknown'
-        return results
+    @property
+    def zero_shot_pipe(self):
+        return self._zero_shot_pipe if self._zero_shot_pipe is not None else models.zero_shot()
+
+    def _rank(self, text: str, labels: list[str], multi_label: bool = False) -> list[LabelScore]:
+        res = self.zero_shot_pipe(text, candidate_labels=labels, multi_label=multi_label)
+        return [
+            LabelScore(label=lab, score=round(float(s), 4))
+            for lab, s in zip(res["labels"], res["scores"], strict=True)
+        ]
+
+    def classify(
+        self, text: str, topics: list[str] | None = None, top_k: int = 3
+    ) -> ClassificationResult:
+        window = first_words(text, config.CLASSIFY_WINDOW_WORDS)
+        sent = self.sentiment_pipe(window, truncation=True)[0]
+        candidates = topics or list(dict.fromkeys(suggest_topics(text) + self.default_topics))
+        return ClassificationResult(
+            language=detect_language(window),
+            sentiment=LabelScore(
+                label=str(sent["label"]).lower(), score=round(float(sent["score"]), 4)
+            ),
+            style=self._rank(window, config.STYLE_LABELS)[0],
+            political=self._rank(window, config.POLITICAL_LABELS)[0],
+            topics=self._rank(window, candidates, multi_label=True)[:top_k],
+        )
