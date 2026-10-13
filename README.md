@@ -170,7 +170,7 @@ ROUGE-L is implemented in plain Python here, so evaluation adds no dependencies.
 |---|---|---|
 | `TC_SENTIMENT_MODEL` | `tabularisai/multilingual-sentiment-analysis` | Any text-classification checkpoint |
 | `TC_ZERO_SHOT_MODEL` | `facebook/bart-large-mnli` | CI uses `typeform/distilbert-base-uncased-mnli` |
-| `TC_SUMMARY_MODEL` | `sshleifer/distilbart-cnn-12-6` | CI uses `sshleifer/distilbart-xsum-6-6` |
+| `TC_SUMMARY_MODEL` | `sshleifer/distilbart-cnn-12-6` | CI tests this same model (the quality gate is calibrated for it) |
 | `TC_SUMMARY_CHUNK_TOKENS` | `700` | BART accepts 1,024 |
 | `TC_SUMMARY_OVERLAP_TOKENS` | `60` | Context carried across chunks |
 | `TC_SUMMARY_BATCH_SIZE` | `4` | Chunks per forward pass |

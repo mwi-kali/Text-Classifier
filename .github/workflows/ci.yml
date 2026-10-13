@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TC_ZERO_SHOT_MODEL: typeform/distilbert-base-uncased-mnli
-      TC_SUMMARY_MODEL: sshleifer/distilbart-xsum-6-6
+      TC_SUMMARY_MODEL: sshleifer/distilbart-cnn-12-6
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
