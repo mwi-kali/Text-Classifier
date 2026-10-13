@@ -1,2 +1,15 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.sql text eol=lf
+*.csv text eol=lf
+*.ipynb text eol=lf linguist-documentation
+*.png binary
+*.jpg binary
+*.pdf binary
+*.pptx binary
+*.joblib binary
+*.faiss binary
+*.npy binary

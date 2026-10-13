@@ -1,71 +1,70 @@
+from __future__ import annotations
+
 import logging
-import spacy
 import re
+from collections import Counter
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-from spacy.cli import download as spacy_download
-from urllib.parse import urlparse
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+
+_WORD = re.compile(r"[A-Za-z][A-Za-z\-']{2,}")
+_YOUTUBE_ID = re.compile(r"(?:v=|youtu\.be/|shorts/|embed/)([A-Za-z0-9_-]{11})")
+
+
+def configure_logging(level: int = logging.INFO) -> None:
+    logging.basicConfig(format="%(asctime)s %(levelname)-7s %(name)s | %(message)s", level=level)
+
+
+def strip_html(raw: str) -> str:
+    if "<" not in raw:
+        return raw
+    soup = BeautifulSoup(raw, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    return soup.get_text(separator=" ")
 
 
 def clean_text(raw: str) -> str:
-    soup = BeautifulSoup(raw, "html.parser")
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    text = soup.get_text(separator=" ")
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    """
+    Remove markup, bracketed citations like [12] and repeated whitespace.
+
+    Unlike the first version this keeps non-ASCII letters, so French or Swahili text is not
+    shredded before the multilingual sentiment model sees it.
+    """
+    text = strip_html(raw)
+    text = re.sub(r"\[\d+\]", "", text)
+    text = re.sub(r"[​﻿]", "", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def is_url(text: str) -> bool:
     try:
-        parts = urlparse(text)
-        return parts.scheme in ("http", "https") and bool(parts.netloc)
-    except Exception:
+        parts = urlparse(text.strip())
+    except (ValueError, AttributeError):
         return False
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-        level=level,
-    )
+def youtube_id(url: str) -> str | None:
+    if "youtube.com" not in url and "youtu.be" not in url:
+        return None
+    m = _YOUTUBE_ID.search(url)
+    return m.group(1) if m else None
 
 
-def preprocess_text(
-    text: str,
-    lower: bool = False,
-    use_spacy: bool = False
-) -> str:
-    try:
-        soup = BeautifulSoup(text, "html.parser")
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        raw = soup.get_text(separator=" ")
+def first_words(text: str, n: int) -> str:
+    return " ".join(text.split()[:n])
 
-        if use_spacy:
-            
-            try:
-                nlp = spacy.load("xx_ent_wiki_sm")
-            except OSError:
-                logging.warning("Downloading spaCy model xx_ent_wiki_sm…")
-                spacy_download("xx_ent_wiki_sm")
-                nlp = spacy.load("xx_ent_wiki_sm")
-            sentences = []
-            for sent in nlp(raw).sents:
-                s = re.sub(r"\[.*?\]", "", sent.text)
-                s = re.sub(r"\s+", " ", s)
-                if lower:
-                    s = s.lower()
-                sentences.append(s.strip())
-            cleaned = " ".join(sentences)
-        else:
-            cleaned = re.sub(r"\[.*?\]", "", raw)
-            cleaned = re.sub(r"\s+", " ", cleaned)
-            cleaned = re.sub(r"[^a-zA-Z0-9.,!?'\s]", "", cleaned)
-            if lower:
-                cleaned = cleaned.lower()
-            cleaned = cleaned.strip()
-        return cleaned
-    except Exception as e:
-        logging.error(f"Error during text preprocessing: {e}")
-        return text.strip()
+
+def suggest_topics(text: str, top_k: int = 5) -> list[str]:
+    """
+    Frequent content words as candidate topic labels for zero-shot classification.
+
+    The first version loaded a multilingual spaCy NER model (and pip-installed it at runtime)
+    for this; a stop-word-filtered frequency count is lighter and works as well for proposing
+    candidates, since the zero-shot model does the actual ranking.
+    """
+    words = [w.lower().strip("-'") for w in _WORD.findall(text)]
+    counts = Counter(w for w in words if w not in ENGLISH_STOP_WORDS and len(w) > 3)
+    return [w for w, c in counts.most_common(top_k) if c > 1]
