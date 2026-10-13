@@ -19,7 +19,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -42,7 +42,7 @@ jobs:
       TC_ZERO_SHOT_MODEL: typeform/distilbert-base-uncased-mnli
       TC_SUMMARY_MODEL: sshleifer/distilbart-cnn-12-6
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -68,7 +68,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t text-classifier-api:ci .
       - run: |
           docker run -d --name api -p 8000:8000 text-classifier-api:ci
