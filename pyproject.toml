@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-models = ["transformers>=4.40,<5", "torch>=2.2", "sentencepiece>=0.2"]
+models = ["transformers>=4.40,<6", "torch>=2.2", "sentencepiece>=0.2"]
 ui = ["streamlit>=1.36"]
 browser = ["playwright>=1.44"]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "python-multipart>=0.0.9"]
